@@ -10,6 +10,7 @@ import (
 	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/hashicorp/serf/serf"
 	log "github.com/mgutz/logxi/v1"
+	"golang.org/x/net/context"
 )
 
 // Constants
@@ -77,22 +78,41 @@ func New(c *Config) (cer Cerebrum, err error) {
 			return name == CerebrumLeaderEvent
 		},
 	})
-	return &cerebrum{
-		config: c,
-		serfer: serfer,
-	}, nil
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cereb := &cerebrum{
+		context:     ctx,
+		cancel:      cancel,
+		serfEventCh: serfEventCh,
+		logger:      logger,
+		config:      c,
+		serfer:      serfer,
+	}
+
+	// Create serf server
+	cereb.serf, err = cereb.setupSerf()
+	if err != nil {
+		err = logger.Error("Failed to start serf: %v", err)
+		return nil, err
+	}
+
+	cer = cereb
+	return cer, nil
 }
 
 type Cerebrum interface {
 	Start() error
-	Stop() error
+	Stop()
 }
 
 type cerebrum struct {
-	id          string
+	context context.Context
+	cancel  context.CancelFunc
+
 	serfEventCh chan serf.Event
 	config      *Config
 	logger      log.Logger
+	serf        *serf.Serf
 	serfer      serfer.Serfer
 
 	// The raft instance is used among Consul nodes within the
@@ -105,11 +125,49 @@ type cerebrum struct {
 }
 
 func (c *cerebrum) Start() error {
+
+	// Start serf handler
+	c.serfer.Start()
+
+	// Join serf cluster
+	c.logger.Info("Joining cluster", "nodes", c.config.ExistingNodes)
+
+	n, err := c.serf.Join(c.config.ExistingNodes, true)
+	if err != nil && !c.config.Bootstrap {
+		err = c.logger.Error("Failed to join cluster", "err", err)
+		return err
+	}
+	c.logger.Info("Joined cluster", "nodes", n)
+
+	// Start services
+	ctx := Context{
+		Context: c.context,
+		Serf:    c.serf,
+		Raft:    c.raft,
+	}
+	for _, svc := range c.config.Services {
+		svc.Start(&ctx)
+	}
+
 	return nil
 }
 
-func (c *cerebrum) Stop() error {
-	return nil
+func (c *cerebrum) Stop() {
+	c.cancel()
+	for _, svc := range c.config.Services {
+		svc.Stop()
+	}
+
+	// Shutdown serf
+	c.logger.Info("Shutting down Serf server...")
+	c.serf.Leave()
+	c.serf.Shutdown()
+	<-c.serf.ShutdownCh()
+
+	// Stop serf event handlers
+	if err := c.serfer.Stop(); err != nil {
+		c.logger.Warn("error: stopping Serfer handlers", err.Error())
+	}
 }
 
 func (c *cerebrum) setupSerf() (*serf.Serf, error) {
@@ -130,7 +188,7 @@ func (c *cerebrum) setupSerf() (*serf.Serf, error) {
 		"AdvertiseAddr", conf.MemberlistConfig.AdvertiseAddr,
 		"AdvertisePort", conf.MemberlistConfig.AdvertisePort)
 
-	conf.Tags["id"] = c.id
+	conf.Tags["id"] = c.config.NodeID
 	conf.Tags["role"] = "cerebrum-server"
 	conf.Tags["dc"] = c.config.DataCenter
 	// conf.Tags["port"] = fmt.Sprintf("%d", port)
