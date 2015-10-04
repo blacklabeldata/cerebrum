@@ -14,6 +14,6 @@ type Service interface {
 
 type Context struct {
 	Context context.Context
-	Serf    serf.Serf
-	Raft    raft.Raft
+	Serf    *serf.Serf
+	Raft    *raft.Raft
 }
