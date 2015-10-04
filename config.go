@@ -81,4 +81,10 @@ type Config struct {
 
 	// TLSConfig is the
 	TLSConfig *tls.Config
+
+	// Services is an array of services running on top of Cerebrum.
+	Services []Service
+
+	// ExistingNodes is an array of nodes already in the cluster.
+	ExistingNodes []string
 }
