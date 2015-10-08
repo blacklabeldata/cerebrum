@@ -110,6 +110,7 @@ type NodeDetails struct {
 	Role       string
 	DataCenter string
 	Addr       net.IP
+	Port       int
 	Services   []NodeService
 	Tags       map[string]string
 	Status     serf.MemberStatus
@@ -120,7 +121,7 @@ func (n NodeDetails) String() (s string) {
 	if b, err := n.Addr.MarshalText(); err != nil {
 		s = fmt.Sprintf("NodeDetails{Name: \"%s\", Role: \"%s\", DataCenter: \"%s\"}", n.Name, n.Role, n.DataCenter)
 	} else {
-		s = fmt.Sprintf("NodeDetails{Name: \"%s\", Role: \"%s\", DataCenter: \"%s\", Addr: \"%s:%d\"}", n.Name, n.Role, n.DataCenter, string(b))
+		s = fmt.Sprintf("NodeDetails{Name: \"%s\", Role: \"%s\", DataCenter: \"%s\", Addr: \"%s:%d\"}", n.Name, n.Role, n.DataCenter, string(b), n.Port)
 	}
 	return
 }
