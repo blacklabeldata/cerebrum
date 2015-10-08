@@ -6,8 +6,6 @@ import (
 	"io"
 	"net"
 	"time"
-
-	"github.com/hashicorp/raft"
 )
 
 var (
@@ -22,15 +20,9 @@ type TLSStreamLayer struct {
 	config    *tls.Config
 }
 
-// NewTLSTransport returns a raft.NetworkTransport that is built on top of
+// NewTLSStreamLayer returns a raft.StreamLayer that is built on top of
 // a TLS streaming transport layer.
-func NewTLSTransport(
-	bindAddr string,
-	maxPool int,
-	timeout time.Duration,
-	logOutput io.Writer,
-	config *tls.Config,
-) (*raft.NetworkTransport, error) {
+func NewTLSStreamLayer(bindAddr string, logOutput io.Writer, config *tls.Config) (*TLSStreamLayer, error) {
 
 	// Try to bind
 	listener, err := tls.Listen("tcp", bindAddr, config)
@@ -42,6 +34,7 @@ func NewTLSTransport(
 	stream := &TLSStreamLayer{
 		advertise: listener.Addr(),
 		listener:  listener.(*net.TCPListener),
+		config:    config,
 	}
 
 	// Verify that we have a usable advertise address
@@ -54,10 +47,7 @@ func NewTLSTransport(
 		listener.Close()
 		return nil, errNotAdvertisable
 	}
-
-	// Create the network transport
-	trans := raft.NewNetworkTransport(stream, maxPool, timeout, logOutput)
-	return trans, nil
+	return stream, nil
 }
 
 // Dial implements the StreamLayer interface.
