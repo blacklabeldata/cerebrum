@@ -6,9 +6,12 @@ import (
 	"net"
 	"time"
 
-	"github.com/blacklabeldata/namedtuple"
+	log "github.com/mgutz/logxi/v1"
 
+	"github.com/blacklabeldata/grim"
+	"github.com/blacklabeldata/namedtuple"
 	"github.com/hashicorp/yamux"
+	"golang.org/x/net/context"
 	tomb "gopkg.in/tomb.v2"
 )
 
@@ -155,4 +158,46 @@ func (c *cerebrum) handleStream(parent tomb.Tomb, stream net.Conn) error {
 		}
 	}
 	return nil
+}
+
+type ForwardingHandler struct {
+	applier Applier
+	logger  log.Logger
+}
+
+func (f *ForwardingHandler) Handle(c context.Context, conn net.Conn) {
+	g := grim.ReaperWithContext(c)
+	defer g.Wait()
+
+	messages := make(chan namedtuple.Tuple, 1)
+	g.Spawn(func(ctx context.Context) {
+		defer conn.Close()
+		for {
+			select {
+			case <-ctx.Done():
+			case msg, ok := <-messages:
+				if !ok {
+					return
+				}
+				if err := f.applier.Apply(msg); err != nil {
+					f.logger.Warn("error applying message")
+				}
+			}
+		}
+	})
+	g.Spawn(func(ctx context.Context) {
+		defer close(messages)
+		decoder := namedtuple.NewDecoder(namedtuple.DefaultRegistry, conn)
+		for {
+			tuple, err := decoder.Decode()
+			if err != nil {
+				return
+			}
+
+			if tuple.Is(nodeStatus) {
+				messages <- tuple
+			}
+		}
+	})
+	return
 }
