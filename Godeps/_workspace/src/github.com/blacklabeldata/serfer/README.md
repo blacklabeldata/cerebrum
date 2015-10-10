@@ -1,0 +1,2 @@
+# serfer [![GoDoc](https://godoc.org/github.com/blacklabeldata/serfer?status.svg)](https://godoc.org/github.com/blacklabeldata/serfer) [![Build Status](https://travis-ci.org/blacklabeldata/serfer.svg)](https://travis-ci.org/blacklabeldata/serfer) [![Coverage Status](https://coveralls.io/repos/blacklabeldata/serfer/badge.svg?branch=master)](https://coveralls.io/github/blacklabeldata/serfer?branch=master)
+Serfer is a simple abstraction over Serf event handling
