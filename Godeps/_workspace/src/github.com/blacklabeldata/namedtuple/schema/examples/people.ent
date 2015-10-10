@@ -1,0 +1,62 @@
+package person
+
+type Address {
+
+    version 1 {
+
+        required string street
+        optional string street2
+        required string city
+        required string country
+        required uint16 zipcode
+    }
+}
+
+// Generic person type
+type Person {
+    
+    // Version 1 simply adds first and last names
+    version 1 {
+        required string first_name
+        required string last_name
+    }
+
+    // Version 2 adds data of birth
+    version 2 {
+
+        // Date of birth
+        required datetime dob
+    }
+
+    // Version 3 adds Address
+    version 3 {
+        optional Address address
+    }
+}
+
+type Employee {
+    
+    // Version 1 Employee
+    // Requires: 
+    //    Person.first_name
+    //    Person.last_name
+    //    Person.dob
+    //    Employee.empid
+    version 1 {
+
+        // Employee ID
+        required uint32 empid
+    }
+
+    version 2 {
+
+        // Division
+        optional string division
+    }
+
+    version 3 {
+
+        // Office Number
+        optional uint16 office_number
+    }
+}

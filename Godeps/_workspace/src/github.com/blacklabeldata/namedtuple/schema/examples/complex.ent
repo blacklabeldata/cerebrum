@@ -1,0 +1,31 @@
+package users.package
+
+from some.package import Something
+
+// Location type
+type Location {
+
+  // Coordinates
+  version 1 {
+    required float64 latitude, longitude, altitude
+  }
+}
+
+// User object
+type User {
+
+  // base user
+  version 1 {
+    required string uuid, username
+    optional uint8 age
+  }
+
+  // 11/15/14
+  version 2 {
+      optional Location location
+  }
+
+  version 3 {
+    optional []User friends
+  }
+}
