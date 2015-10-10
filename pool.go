@@ -66,7 +66,7 @@ func (c *Conn) dialForwarding() (net.Conn, error) {
 // ConnPool is used to maintain a connection pool to other
 // Nomad servers. This is used to reduce the latency of
 // RPC requests between servers. It is only used to pool
-// connections in the rpcNomad mode. Raft connections
+// connections in the rpc mode. Raft connections
 // are pooled separately.
 type ConnPool struct {
 	sync.Mutex
@@ -206,7 +206,7 @@ func (p *ConnPool) getClient(addr string, timeout time.Duration) (*Conn, error) 
 	return conn, nil
 }
 
-func (p *ConnPool) DialRaft(addr string, timeout time.Duration) (net.Conn, error) {
+func (p *ConnPool) dialRaft(addr string, timeout time.Duration) (net.Conn, error) {
 	// Get a usable client
 	conn, err := p.getClient(addr, timeout)
 	if err != nil {
@@ -217,7 +217,7 @@ func (p *ConnPool) DialRaft(addr string, timeout time.Duration) (net.Conn, error
 	return conn.dialRaft()
 }
 
-func (p *ConnPool) DialForwarding(addr string, timeout time.Duration) (net.Conn, error) {
+func (p *ConnPool) dialForwarding(addr string, timeout time.Duration) (net.Conn, error) {
 	// Get a usable client
 	conn, err := p.getClient(addr, timeout)
 	if err != nil {
@@ -225,7 +225,7 @@ func (p *ConnPool) DialForwarding(addr string, timeout time.Duration) (net.Conn,
 	}
 
 	// Return forwarding raft stream
-	return conn.dialRaft()
+	return conn.dialForwarding()
 }
 
 // Reap is used to close conns open over maxTime
