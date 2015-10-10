@@ -19,14 +19,13 @@ func init() {
 
 	// Node registration type
 	nodeStatus = namedtuple.New("cerebrum", "NodeStatus")
-	nodeStatus.AddVersion([]namedtuple.Field{
+	nodeStatus.AddVersion(
 		namedtuple.Field{"ID", true, namedtuple.StringField},
 		namedtuple.Field{"Name", true, namedtuple.StringField},
 		namedtuple.Field{"DataCenter", true, namedtuple.StringField},
 		namedtuple.Field{"Status", true, namedtuple.Uint8Field},
 		namedtuple.Field{"Addr", true, namedtuple.StringField},
-		namedtuple.Field{"Port", true, namedtuple.Int32Field},
-	}...)
+		namedtuple.Field{"Port", true, namedtuple.Int32Field})
 	namedtuple.DefaultRegistry.Register(nodeStatus)
 }
 
@@ -64,5 +63,5 @@ func (c *cerebrum) updateNodeStatus(details *NodeDetails, status NodeStatus) (er
 		c.logger.Warn("Failed to build NodeStatus", "err", err)
 		return
 	}
-	return c.apply(tuple)
+	return c.applier.Apply(tuple)
 }
