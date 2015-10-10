@@ -1,9 +1,7 @@
 package cerebrum
 
 import (
-	"bytes"
 	"crypto/tls"
-	"fmt"
 	"io"
 	"net"
 	"time"
@@ -149,49 +147,12 @@ func (c *cerebrum) handleStream(parent tomb.Tomb, stream net.Conn) error {
 
 			switch {
 			case tuple.Is(nodeStatus):
-				c.apply(tuple)
+				if err := c.applier.Apply(tuple); err != nil {
+					return err
+				}
 			default:
 			}
 		}
-	}
-	return nil
-}
-
-func (c *cerebrum) apply(tuple namedtuple.Tuple) error {
-	var buf bytes.Buffer
-	tuple.WriteTo(&buf)
-	data := buf.Bytes()
-
-	// Warn if the command is very large
-	if n := buf.Len(); n > raftWarnSize {
-		c.logger.Warn("Attempting to apply large raft entry", "size", n)
-	}
-
-	if c.IsLeader() {
-		future := c.raft.Apply(data, enqueueLimit)
-		return future.Error()
-	}
-
-	// Handle leader forwarding
-	return c.forwardLeader(data)
-}
-
-// forwardLeader is used to forward an RPC call to the leader, or fail if no leader
-func (s *cerebrum) forwardLeader(buf []byte) error {
-	// Get the leader
-	leader := s.raft.Leader()
-	if leader == "" {
-		return fmt.Errorf("No cluster leader")
-	}
-
-	// Connect to leader via yamux stream
-	conn, err := s.pool.DialForwarding(leader, 3*time.Second)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	if _, err = conn.Write(buf); err != nil {
-		return err
 	}
 	return nil
 }

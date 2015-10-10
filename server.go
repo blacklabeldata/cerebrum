@@ -1,6 +1,7 @@
 package cerebrum
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/hashicorp/serf/serf"
 	log "github.com/mgutz/logxi/v1"
 	"golang.org/x/net/context"
+	tomb "gopkg.in/tomb.v2"
 )
 
 // Constants
@@ -43,21 +45,34 @@ func New(c *Config) (cer Cerebrum, err error) {
 	// Create data directory
 	if err = os.MkdirAll(c.DataPath, 0755); err != nil {
 		logger.Warn("Could not create data directory", "err", err)
-		// logger.Warn("Could not create data directory", "err", err.Error())
 		return
 	}
 
-	// TODO: Replace with Raft IsLeader check
-	isLeader := func() bool {
-		return true
+	// Setup reconciler
+	serfEventCh := make(chan serf.Event, 256)
+	reconcilerCh := make(chan serf.Member, 32)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cereb := &cerebrum{
+		config:      c,
+		logger:      logger,
+		dialer:      NewDialer(NewPool(c.LogOutput, 5*time.Minute, c.TLSConfig)),
+		serfEventCh: serfEventCh,
+		reconcileCh: reconcilerCh,
+		context:     ctx,
+		cancel:      cancel,
 	}
 
-	// Setup reconciler
-	reconcilerCh := make(chan serf.Member, 32)
-	reconciler := &Reconciler{reconcilerCh, isLeader}
+	// Create serf server
+	err = cereb.setupRaft()
+	if err != nil {
+		err = logger.Error("Failed to start serf: %v", err)
+		return nil, err
+	}
 
-	serfEventCh := make(chan serf.Event, 256)
-	serfer := serfer.NewSerfer(serfEventCh, serfer.SerfEventHandler{
+	isLeader := func() bool { return cereb.raft.State() == raft.Leader }
+	reconciler := &Reconciler{reconcilerCh, isLeader}
+	cereb.serfer = serfer.NewSerfer(serfEventCh, serfer.SerfEventHandler{
 		Logger:              log.NewLogger(c.LogOutput, CerebrumEventPrefix),
 		ServicePrefix:       CerebrumEventPrefix,
 		ReconcileOnJoin:     true,
@@ -77,17 +92,8 @@ func New(c *Config) (cer Cerebrum, err error) {
 		IsLeaderEvent: func(name string) bool {
 			return name == CerebrumLeaderEvent
 		},
+		LeaderElectionHandler: cereb,
 	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cereb := &cerebrum{
-		context:     ctx,
-		cancel:      cancel,
-		serfEventCh: serfEventCh,
-		logger:      logger,
-		config:      c,
-		serfer:      serfer,
-	}
 
 	// Create serf server
 	cereb.serf, err = cereb.setupSerf()
@@ -106,12 +112,13 @@ type Cerebrum interface {
 }
 
 type cerebrum struct {
-	context context.Context
-	cancel  context.CancelFunc
+	config *Config
+	logger log.Logger
 
+	// pool        *ConnPool
+	dialer      Dialer
 	serfEventCh chan serf.Event
-	config      *Config
-	logger      log.Logger
+	leader      string
 	serf        *serf.Serf
 	serfer      serfer.Serfer
 
@@ -119,9 +126,19 @@ type cerebrum struct {
 	// DC to protect operations that require strong consistency
 	raft          *raft.Raft
 	raftPeers     raft.PeerStore
+	raftLayer     *RaftLayer
 	raftStore     *raftboltdb.BoltStore
 	raftTransport *raft.NetworkTransport
+	reconcileCh   chan serf.Member
+	listener      *net.TCPListener
 	fsm           raft.FSM
+
+	applier   Applier
+	forwarder Forwarder
+
+	t       tomb.Tomb
+	context context.Context
+	cancel  context.CancelFunc
 }
 
 func (c *cerebrum) Start() error {
@@ -168,6 +185,9 @@ func (c *cerebrum) Stop() {
 	if err := c.serfer.Stop(); err != nil {
 		c.logger.Warn("error: stopping Serfer handlers", err.Error())
 	}
+
+	c.listener.Close()
+	c.dialer.Shutdown()
 }
 
 func (c *cerebrum) setupSerf() (*serf.Serf, error) {
@@ -224,13 +244,6 @@ func (c *cerebrum) setupRaft() error {
 		return err
 	}
 
-	// // Create the FSM
-	// var err error
-	// c.fsm, err = NewFSM(statePath, c.config.LogOutput)
-	// if err != nil {
-	// 	return err
-	// }
-
 	// Create the base raft path
 	path := filepath.Join(c.config.DataPath, RaftStateDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -258,18 +271,24 @@ func (c *cerebrum) setupRaft() error {
 		return err
 	}
 
-	// Create TCP transport
-	trans, err := NewTLSTransport("0.0.0.0:9122", 3, 10*time.Second, c.config.LogOutput, c.config.TLSConfig)
+	// Try to bind
+	addr, err := net.ResolveTCPAddr("tcp", c.config.RaftBindAddr)
 	if err != nil {
 		return err
 	}
 
-	// // Create a transport layer
-	// trans := raft.NewNetworkTransport(t, 3, 10*time.Second, c.config.LogOutput)
-	c.raftTransport = trans
+	// Start TCP listener
+	listener, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		return err
+	}
+	c.listener = listener
+
+	layer := NewRaftLayer(c.dialer, listener.Addr(), c.config.TLSConfig)
+	c.raftTransport = raft.NewNetworkTransport(layer, 3, 10*time.Second, c.config.LogOutput)
 
 	// Setup the peer store
-	c.raftPeers = raft.NewJSONPeers(path, trans)
+	c.raftPeers = raft.NewJSONPeers(path, c.raftTransport)
 
 	// Ensure local host is always included if we are in bootstrap mode
 	if c.config.Bootstrap {
@@ -278,8 +297,8 @@ func (c *cerebrum) setupRaft() error {
 			store.Close()
 			return err
 		}
-		if !raft.PeerContained(peers, trans.LocalAddr()) {
-			c.raftPeers.SetPeers(raft.AddUniquePeer(peers, trans.LocalAddr()))
+		if !raft.PeerContained(peers, c.raftTransport.LocalAddr()) {
+			c.raftPeers.SetPeers(raft.AddUniquePeer(peers, c.raftTransport.LocalAddr()))
 		}
 	}
 
@@ -288,12 +307,16 @@ func (c *cerebrum) setupRaft() error {
 
 	// Setup the Raft store
 	c.raft, err = raft.NewRaft(c.config.RaftConfig, c.fsm, cacheStore, store,
-		snapshots, c.raftPeers, trans)
+		snapshots, c.raftPeers, c.raftTransport)
 	if err != nil {
 		store.Close()
-		trans.Close()
+		c.raftTransport.Close()
 		return err
 	}
+
+	// Setup forwarding and applier
+	c.forwarder = NewForwarder(c.raft, c.dialer, log.NewLogger(c.config.LogOutput, "forwarder"))
+	c.applier = NewApplier(c.raft, c.forwarder, log.NewLogger(c.config.LogOutput, "applier"))
 
 	// // Start monitoring leadership
 	// c.t.Go(func() error {

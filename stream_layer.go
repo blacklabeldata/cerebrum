@@ -21,7 +21,8 @@ type RaftLayer struct {
 	config *tls.Config
 
 	// pool is a connection pool
-	pool *ConnPool
+	// pool *ConnPool
+	dialer Dialer
 
 	// Tracks if we are closed
 	closed    bool
@@ -32,8 +33,9 @@ type RaftLayer struct {
 // NewRaftLayer is used to initialize a new RaftLayer which can
 // be used as a StreamLayer for Raft. If a tlsConfig is provided,
 // then the connection will use TLS.
-func NewRaftLayer(addr net.Addr, config *tls.Config) *RaftLayer {
+func NewRaftLayer(dialer Dialer, addr net.Addr, config *tls.Config) *RaftLayer {
 	layer := &RaftLayer{
+		dialer:  dialer,
 		addr:    addr,
 		connCh:  make(chan net.Conn),
 		closeCh: make(chan struct{}),
@@ -84,5 +86,5 @@ func (l *RaftLayer) Addr() net.Addr {
 func (l *RaftLayer) Dial(address string, timeout time.Duration) (net.Conn, error) {
 
 	// Get TLS/yamux Raft stream from Connection pool
-	return l.pool.DialRaft(address, timeout)
+	return l.dialer.Dial(connRaft, address, timeout)
 }
