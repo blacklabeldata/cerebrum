@@ -44,7 +44,7 @@ func (c *cerebrum) monitorLeadership() {
 				stopCh = nil
 				c.logger.Info("cluster leadership lost")
 			}
-		case <-c.t.Dying():
+		case <-c.context.Done():
 			return
 		}
 	}
@@ -99,7 +99,7 @@ WAIT:
 		select {
 		case <-stopCh:
 			return
-		case <-c.t.Dying():
+		case <-c.context.Done():
 			return
 		case <-interval:
 			goto RECONCILE
