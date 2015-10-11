@@ -35,7 +35,7 @@ func (f *ForwardingHandler) Handle(c context.Context, conn net.Conn) {
 	defer g.Wait()
 
 	messages := make(chan namedtuple.Tuple, 1)
-	g.Spawn(func(ctx context.Context) {
+	g.SpawnFunc(func(ctx context.Context) {
 		defer conn.Close()
 		for {
 			select {
@@ -50,7 +50,7 @@ func (f *ForwardingHandler) Handle(c context.Context, conn net.Conn) {
 			}
 		}
 	})
-	g.Spawn(func(ctx context.Context) {
+	g.SpawnFunc(func(ctx context.Context) {
 		defer close(messages)
 		decoder := namedtuple.NewDecoder(namedtuple.DefaultRegistry, conn)
 		for {
