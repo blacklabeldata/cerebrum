@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/blacklabeldata/grim"
 	"github.com/blacklabeldata/serfer"
+	"github.com/blacklabeldata/yamuxer"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/hashicorp/serf/serf"
 	log "github.com/mgutz/logxi/v1"
 	"golang.org/x/net/context"
-	tomb "gopkg.in/tomb.v2"
+	// tomb "gopkg.in/tomb.v2"
 )
 
 // Constants
@@ -59,6 +61,7 @@ func New(c *Config) (cer Cerebrum, err error) {
 		dialer:      NewDialer(NewPool(c.LogOutput, 5*time.Minute, c.TLSConfig)),
 		serfEventCh: serfEventCh,
 		reconcileCh: reconcilerCh,
+		grim:        grim.ReaperWithContext(ctx),
 		context:     ctx,
 		cancel:      cancel,
 	}
@@ -130,13 +133,15 @@ type cerebrum struct {
 	raftStore     *raftboltdb.BoltStore
 	raftTransport *raft.NetworkTransport
 	reconcileCh   chan serf.Member
-	listener      *net.TCPListener
-	fsm           raft.FSM
+	// listener      *net.TCPListener
+	muxer yamuxer.Yamuxer
+	fsm   raft.FSM
 
 	applier   Applier
 	forwarder Forwarder
 
-	t       tomb.Tomb
+	// t       tomb.Tomb
+	grim    grim.GrimReaper
 	context context.Context
 	cancel  context.CancelFunc
 }
@@ -186,7 +191,8 @@ func (c *cerebrum) Stop() {
 		c.logger.Warn("error: stopping Serfer handlers", err.Error())
 	}
 
-	c.listener.Close()
+	// c.listener.Close()
+	c.muxer.Stop()
 	c.dialer.Shutdown()
 }
 
@@ -282,10 +288,24 @@ func (c *cerebrum) setupRaft() error {
 	if err != nil {
 		return err
 	}
-	c.listener = listener
 
+	// Create connection layer and transport
 	layer := NewRaftLayer(c.dialer, listener.Addr(), c.config.TLSConfig)
 	c.raftTransport = raft.NewNetworkTransport(layer, 3, 10*time.Second, c.config.LogOutput)
+
+	// Create TLS connection dispatcher
+	dispatcher := yamuxer.NewDispatcher(log.NewLogger(c.config.LogOutput, "dispatcher"), nil)
+	dispatcher.Register(connRaft, layer)
+	dispatcher.Register(connForward, &ForwardingHandler{c.applier, log.NewLogger(c.config.LogOutput, "forwarder")})
+
+	// Create TLS connection muxer
+	c.muxer = yamuxer.New(c.context, &yamuxer.Config{
+		Listener:   listener,
+		TLSConfig:  c.config.TLSConfig,
+		Deadline:   c.config.ConnectionDeadline,
+		LogOutput:  c.config.LogOutput,
+		Dispatcher: dispatcher,
+	})
 
 	// Setup the peer store
 	c.raftPeers = raft.NewJSONPeers(path, c.raftTransport)
@@ -316,7 +336,7 @@ func (c *cerebrum) setupRaft() error {
 
 	// Setup forwarding and applier
 	c.forwarder = NewForwarder(c.raft, c.dialer, log.NewLogger(c.config.LogOutput, "forwarder"))
-	c.applier = NewApplier(c.raft, c.forwarder, log.NewLogger(c.config.LogOutput, "applier"))
+	c.applier = NewApplier(c.raft, c.forwarder, log.NewLogger(c.config.LogOutput, "applier"), c.config.EnqueueTimeout)
 
 	// // Start monitoring leadership
 	// c.t.Go(func() error {
