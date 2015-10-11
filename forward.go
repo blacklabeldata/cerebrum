@@ -16,14 +16,6 @@ const (
 	connRaft                       = 0x02
 )
 
-const (
-// enqueueLimit caps how long we will wait to enqueue
-// a new Raft command. Something is probably wrong if this
-// value is ever reached. However, it prevents us from blocking
-// the requesting goroutine forever.
-// enqueueLimit = 30 * time.Second
-)
-
 type ForwardingHandler struct {
 	applier Applier
 	logger  log.Logger
