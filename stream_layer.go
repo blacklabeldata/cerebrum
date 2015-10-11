@@ -6,6 +6,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"golang.org/x/net/context"
 )
 
 // RaftLayer implements the raft.StreamLayer interface,
@@ -51,6 +53,19 @@ func (l *RaftLayer) Handoff(c net.Conn) error {
 		return nil
 	case <-l.closeCh:
 		return fmt.Errorf("Raft RPC layer closed")
+	}
+}
+
+func (l *RaftLayer) Handle(c context.Context, conn net.Conn) {
+	select {
+	case <-c.Done():
+		conn.Close()
+		return
+	case <-l.closeCh:
+		conn.Close()
+		return
+	case l.connCh <- conn:
+		return
 	}
 }
 
