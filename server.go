@@ -148,6 +148,9 @@ type cerebrum struct {
 
 func (c *cerebrum) Start() error {
 
+	// Start monitoring raft cluster
+	go c.monitorLeadership()
+
 	// Start serf handler
 	c.serfer.Start()
 
