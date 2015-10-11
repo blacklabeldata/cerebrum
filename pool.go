@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blacklabeldata/yamuxer"
 	"github.com/hashicorp/yamux"
 )
 
@@ -43,7 +44,7 @@ func (c *Conn) getClient() (net.Conn, error) {
 	return stream, nil
 }
 
-func (c *Conn) dial(t ConnType) (net.Conn, error) {
+func (c *Conn) dial(t yamuxer.StreamType) (net.Conn, error) {
 	stream, err := c.getClient()
 	if err != nil {
 		return nil, err
