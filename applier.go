@@ -26,18 +26,20 @@ type RaftApplier interface {
 	Leader() string
 }
 
-func NewApplier(r RaftApplier, f Forwarder, l log.Logger) Applier {
+func NewApplier(r RaftApplier, f Forwarder, l log.Logger, timeout time.Duration) Applier {
 	return &applier{
-		logger:    l,
-		raft:      r,
-		forwarder: f,
+		logger:       l,
+		raft:         r,
+		forwarder:    f,
+		enqueueLimit: timeout,
 	}
 }
 
 type applier struct {
-	logger    log.Logger
-	raft      RaftApplier
-	forwarder Forwarder
+	logger       log.Logger
+	raft         RaftApplier
+	forwarder    Forwarder
+	enqueueLimit time.Duration
 }
 
 func (c *applier) Apply(tuple namedtuple.Tuple) error {
@@ -45,13 +47,8 @@ func (c *applier) Apply(tuple namedtuple.Tuple) error {
 	tuple.WriteTo(&buf)
 	data := buf.Bytes()
 
-	// Warn if the command is very large
-	if n := buf.Len(); n > raftWarnSize {
-		c.logger.Warn("Attempting to apply large raft entry", "size", n)
-	}
-
 	if c.raft.State() == raft.Leader {
-		future := c.raft.Apply(data, enqueueLimit)
+		future := c.raft.Apply(data, c.enqueueLimit)
 		return future.Error()
 	}
 
