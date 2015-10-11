@@ -1,6 +1,10 @@
 package cerebrum
 
-import "github.com/blacklabeldata/namedtuple"
+import (
+	log "github.com/mgutz/logxi/v1"
+
+	"github.com/blacklabeldata/namedtuple"
+)
 
 var (
 	nodeStatus namedtuple.TupleType
@@ -29,39 +33,52 @@ func init() {
 	namedtuple.DefaultRegistry.Register(nodeStatus)
 }
 
-func (c *cerebrum) updateNodeStatus(details *NodeDetails, status NodeStatus) (err error) {
-	buffer := make([]byte, 512)
-	builder := namedtuple.NewBuilder(nodeStatus, buffer)
+type NodeStatusUpdater interface {
+	Update(*NodeDetails, NodeStatus) error
+}
+
+func NewNodeStatusUpdater(a Applier, l log.Logger) NodeStatusUpdater {
+	return &nodeStatusUpdater{applier: a, logger: l}
+}
+
+type nodeStatusUpdater struct {
+	buffer  [512]byte
+	applier Applier
+	logger  log.Logger
+}
+
+func (n *nodeStatusUpdater) Update(details *NodeDetails, status NodeStatus) (err error) {
+	builder := namedtuple.NewBuilder(nodeStatus, n.buffer[:])
 	if _, err = builder.PutString("ID", details.ID); err != nil {
-		c.logger.Warn("Failed to encode NodeStatus", "field", "ID", "err", err)
+		n.logger.Warn("Failed to encode NodeStatus", "field", "ID", "err", err)
 		return
 	}
 	if _, err = builder.PutString("Name", details.Name); err != nil {
-		c.logger.Warn("Failed to encode NodeStatus", "field", "Name", "err", err)
+		n.logger.Warn("Failed to encode NodeStatus", "field", "Name", "err", err)
 		return
 	}
 	if _, err = builder.PutString("DataCenter", details.DataCenter); err != nil {
-		c.logger.Warn("Failed to encode NodeStatus", "field", "DataCenter", "err", err)
+		n.logger.Warn("Failed to encode NodeStatus", "field", "DataCenter", "err", err)
 		return
 	}
 	if _, err = builder.PutUint8("Status", uint8(status)); err != nil {
-		c.logger.Warn("Failed to encode NodeStatus", "field", "Status", "err", err)
+		n.logger.Warn("Failed to encode NodeStatus", "field", "Status", "err", err)
 		return
 	}
 	if _, err = builder.PutString("Addr", details.Addr.String()); err != nil {
-		c.logger.Warn("Failed to encode NodeStatus", "field", "Addr", "err", err)
+		n.logger.Warn("Failed to encode NodeStatus", "field", "Addr", "err", err)
 		return
 	}
 	if _, err = builder.PutInt32("Port", int32(details.Port)); err != nil {
-		c.logger.Warn("Failed to encode NodeStatus", "field", "Port", "err", err)
+		n.logger.Warn("Failed to encode NodeStatus", "field", "Port", "err", err)
 		return
 	}
 
 	// encode data
 	tuple, err := builder.Build()
 	if err != nil {
-		c.logger.Warn("Failed to build NodeStatus", "err", err)
+		n.logger.Warn("Failed to build NodeStatus", "err", err)
 		return
 	}
-	return c.applier.Apply(tuple)
+	return n.applier.Apply(tuple)
 }

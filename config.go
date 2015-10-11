@@ -106,8 +106,6 @@ type Config struct {
 	// Raft cluster.
 	RevokeLeadership func() error
 
-	// ConsistentNodeStatus
-
 	// Services is an array of services running on top of Cerebrum.
 	Services []Service
 

@@ -127,15 +127,15 @@ type cerebrum struct {
 
 	// The raft instance is used among Consul nodes within the
 	// DC to protect operations that require strong consistency
-	raft          *raft.Raft
-	raftPeers     raft.PeerStore
-	raftLayer     *RaftLayer
-	raftStore     *raftboltdb.BoltStore
-	raftTransport *raft.NetworkTransport
-	reconcileCh   chan serf.Member
-	// listener      *net.TCPListener
-	muxer yamuxer.Yamuxer
-	fsm   raft.FSM
+	raft              *raft.Raft
+	raftPeers         raft.PeerStore
+	raftLayer         *RaftLayer
+	raftStore         *raftboltdb.BoltStore
+	raftTransport     *raft.NetworkTransport
+	reconcileCh       chan serf.Member
+	nodeStatusUpdater NodeStatusUpdater
+	muxer             yamuxer.Yamuxer
+	fsm               raft.FSM
 
 	applier   Applier
 	forwarder Forwarder
@@ -341,10 +341,6 @@ func (c *cerebrum) setupRaft() error {
 	c.forwarder = NewForwarder(c.raft, c.dialer, log.NewLogger(c.config.LogOutput, "forwarder"))
 	c.applier = NewApplier(c.raft, c.forwarder, log.NewLogger(c.config.LogOutput, "applier"), c.config.EnqueueTimeout)
 
-	// // Start monitoring leadership
-	// c.t.Go(func() error {
-	// 	c.monitorLeadership()
-	// 	return nil
-	// })
+	c.nodeStatusUpdater = NewNodeStatusUpdater(c.applier, log.NewLogger(c.config.LogOutput, "node-status-updater"))
 	return nil
 }

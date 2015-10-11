@@ -172,14 +172,14 @@ func (c *cerebrum) handleAliveMember(member serf.Member, details *NodeDetails) e
 	}
 
 	c.logger.Info("member joined, marking health alive", "member", member.Name)
-	return c.updateNodeStatus(details, StatusAlive)
+	return c.nodeStatusUpdater.Update(details, StatusAlive)
 }
 
 // handleFailedMember is used to mark the node's status
 // as being critical, along with all checks as unknown.
 func (c *cerebrum) handleFailedMember(member serf.Member, details *NodeDetails) error {
 	c.logger.Info("member failed, marking health critical", "member", member.Name)
-	return c.updateNodeStatus(details, StatusFailed)
+	return c.nodeStatusUpdater.Update(details, StatusFailed)
 }
 
 // handleLeftMember is used to handle members that gracefully
@@ -211,7 +211,7 @@ func (c *cerebrum) handleDeregisterMember(reason NodeStatus, member serf.Member,
 
 	// Deregister the node
 	c.logger.Info("deregistering member", "name", member.Name, "reason", reason)
-	return c.updateNodeStatus(details, reason)
+	return c.nodeStatusUpdater.Update(details, reason)
 }
 
 // joinConsulServer is used to try to join another consul server
