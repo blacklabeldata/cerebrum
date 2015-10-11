@@ -70,12 +70,12 @@ func TestApplier_LeaderState(t *testing.T) {
 
 	raftApplier := &MockRaftApplier{state: raft.Leader, future: future}
 	raftApplier.On("State").Return(raft.Leader)
-	raftApplier.On("Apply", data, enqueueLimit).Return(future)
+	raftApplier.On("Apply", data, time.Second).Return(future)
 
-	applier := NewApplier(raftApplier, fwdr, &log.NullLogger{})
+	applier := NewApplier(raftApplier, fwdr, &log.NullLogger{}, time.Second)
 	err = applier.Apply(tuple)
 	assert.Nil(t, err)
-	raftApplier.AssertCalled(t, "Apply", data, enqueueLimit)
+	raftApplier.AssertCalled(t, "Apply", data, time.Second)
 	fwdr.AssertNotCalled(t, "Forward")
 }
 

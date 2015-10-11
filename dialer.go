@@ -3,12 +3,14 @@ package cerebrum
 import (
 	"net"
 	"time"
+
+	"github.com/blacklabeldata/yamuxer"
 )
 
 // Dialer dials an address and initializes a connection of the given type.
 // If the timeout occurs before the dial completes, an error will be returned.
 type Dialer interface {
-	Dial(t ConnType, addr string, timeout time.Duration) (net.Conn, error)
+	Dial(t yamuxer.StreamType, addr string, timeout time.Duration) (net.Conn, error)
 	Shutdown() error
 }
 
@@ -21,7 +23,7 @@ type dialer struct {
 	pool *ConnPool
 }
 
-func (d *dialer) Dial(c ConnType, address string, timeout time.Duration) (net.Conn, error) {
+func (d *dialer) Dial(c yamuxer.StreamType, address string, timeout time.Duration) (net.Conn, error) {
 	switch c {
 	case connRaft:
 		return d.pool.dialRaft(address, timeout)

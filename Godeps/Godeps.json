@@ -10,6 +10,10 @@
 			"Rev": "6c5fa0d8f48f4661c9ba8709799c88d425ad20f0"
 		},
 		{
+			"ImportPath": "github.com/blacklabeldata/grim",
+			"Rev": "ec19edc9ef2f326e929e743b22bee3902c4edb35"
+		},
+		{
 			"ImportPath": "github.com/blacklabeldata/namedtuple",
 			"Rev": "61553a5437c9114e0e56ad1ffe0b9b48560cc8b7"
 		},
@@ -20,6 +24,10 @@
 		{
 			"ImportPath": "github.com/blacklabeldata/xbinary",
 			"Rev": "3cdf46b41c42468c75fdda92f3acbfa30f5a29d6"
+		},
+		{
+			"ImportPath": "github.com/blacklabeldata/yamuxer",
+			"Rev": "ba37981247de24c48a5e5be3fd3d3f8cbcf28b23"
 		},
 		{
 			"ImportPath": "github.com/boltdb/bolt",

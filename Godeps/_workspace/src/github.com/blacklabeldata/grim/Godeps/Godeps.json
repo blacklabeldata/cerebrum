@@ -1,0 +1,13 @@
+{
+	"ImportPath": "github.com/blacklabeldata/grim",
+	"GoVersion": "go1.4.2",
+	"Packages": [
+		"."
+	],
+	"Deps": [
+		{
+			"ImportPath": "golang.org/x/net/context",
+			"Rev": "dfe268fd2bb5c793f4c083803609fce9806c6f80"
+		}
+	]
+}

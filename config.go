@@ -93,6 +93,10 @@ type Config struct {
 	// This deadline also applies to the ammount of time to wait for the server to shutdown.
 	ConnectionDeadline time.Duration
 
+	// EnqueueTimeout is the maximum amount of time a Raft submission will wait
+	// before timing out.
+	EnqueueTimeout time.Duration
+
 	// EstablishLeadership is called when a node becomes the leader of the
 	// Raft cluster. This function can be called multiple times if it returns an
 	// error.

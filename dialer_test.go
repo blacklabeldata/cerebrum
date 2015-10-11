@@ -4,6 +4,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/blacklabeldata/yamuxer"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -13,7 +14,7 @@ type MockDialer struct {
 	conn net.Conn
 }
 
-func (m *MockDialer) Dial(c ConnType, addr string, timeout time.Duration) (net.Conn, error) {
+func (m *MockDialer) Dial(c yamuxer.StreamType, addr string, timeout time.Duration) (net.Conn, error) {
 	m.Called(c, addr, timeout)
 	return m.conn, m.err
 }
