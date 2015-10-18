@@ -12,19 +12,15 @@ import (
 )
 
 type fsm struct {
-	logOutput io.Writer
-	logger    log.Logger
-	path      string
-	userFSM   raft.FSM
+	logger  log.Logger
+	userFSM raft.FSM
 }
 
 // NewFSM is used to construct a new FSM with a blank state
-func NewFSM(path string, userFSM raft.FSM, logOutput io.Writer) (raft.FSM, error) {
+func NewFSM(userFSM raft.FSM, l log.Logger) (raft.FSM, error) {
 	fsm := &fsm{
-		logOutput: logOutput,
-		logger:    log.NewLogger(logOutput, ""),
-		path:      path,
-		userFSM:   userFSM,
+		logger:  l,
+		userFSM: userFSM,
 	}
 	return fsm, nil
 }
