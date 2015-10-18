@@ -4,6 +4,9 @@ import (
 	"net"
 	"time"
 
+	log "github.com/mgutz/logxi/v1"
+	"golang.org/x/net/context"
+
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/serf/serf"
 )
@@ -18,18 +21,33 @@ import (
 // 	LeaderEventName  = "kappa:new-leader"
 // )
 
-func (c *cerebrum) IsLeader() bool {
-	return c.raft.State() == raft.Leader
+type LeadershipMonitor struct {
+	nodeName   string
+	dataCenter string
+
+	raft                *raft.Raft
+	reconcileInterval   time.Duration
+	EstablishLeadership func() error
+	RevokeLeadership    func() error
+	nodeStatusUpdater   NodeStatusUpdater
+
+	serf        *serf.Serf
+	reconcileCh chan serf.Member
+	logger      log.Logger
 }
 
-func (c *cerebrum) setLeader(name string) {
-	c.leader = name
+func (l *LeadershipMonitor) IsLeader() bool {
+	return l.raft.State() == raft.Leader
+}
+
+func (l *LeadershipMonitor) Execute(ctx context.Context) {
+	l.monitorLeadership(ctx)
 }
 
 // monitorLeadership is used to monitor if we acquire or lose our role
 // as the leader in the Raft cluster. There is some work the leader is
 // expected to do, so we must react to changes
-func (c *cerebrum) monitorLeadership() {
+func (c *LeadershipMonitor) monitorLeadership(ctx context.Context) {
 	leaderCh := c.raft.LeaderCh()
 	var stopCh chan struct{}
 	for {
@@ -37,14 +55,14 @@ func (c *cerebrum) monitorLeadership() {
 		case isLeader := <-leaderCh:
 			if isLeader {
 				stopCh = make(chan struct{})
-				go c.leaderLoop(stopCh)
+				go c.leaderLoop(ctx, stopCh)
 				c.logger.Info("cluster leadership acquired")
 			} else if stopCh != nil {
 				close(stopCh)
 				stopCh = nil
 				c.logger.Info("cluster leadership lost")
 			}
-		case <-c.context.Done():
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -52,12 +70,12 @@ func (c *cerebrum) monitorLeadership() {
 
 // leaderLoop runs as long as we are the leader to run various
 // maintenance activities
-func (c *cerebrum) leaderLoop(stopCh chan struct{}) {
+func (c *LeadershipMonitor) leaderLoop(ctx context.Context, stopCh chan struct{}) {
 	// Ensure we revoke leadership on stepdown
 	defer c.revokeLeadership()
 
 	// Fire a user event indicating a new leader
-	payload := []byte(c.config.NodeName)
+	payload := []byte(c.nodeName)
 	if err := c.serf.UserEvent(CerebrumEventPrefix+":new-leader", payload, false); err != nil {
 		c.logger.Warn("failed to broadcast new leader event: %v", err)
 	}
@@ -70,7 +88,7 @@ func (c *cerebrum) leaderLoop(stopCh chan struct{}) {
 RECONCILE:
 	// Setup a reconciliation timer
 	reconcileCh = nil
-	interval := time.After(c.config.ReconcileInterval)
+	interval := time.After(c.reconcileInterval)
 
 	// Apply a raft barrier to ensure our FSM is caught up
 	barrier := c.raft.Barrier(0)
@@ -99,7 +117,7 @@ WAIT:
 		select {
 		case <-stopCh:
 			return
-		case <-c.context.Done():
+		case <-ctx.Done():
 			return
 		case <-interval:
 			goto RECONCILE
@@ -113,25 +131,25 @@ WAIT:
 // to invoke an initial barrier. The barrier is used to ensure any
 // previously inflight transactions have been committed and that our
 // state is up-to-date.
-func (c *cerebrum) establishLeadership() error {
-	if c.config.EstablishLeadership != nil {
-		return c.config.EstablishLeadership()
+func (c *LeadershipMonitor) establishLeadership() error {
+	if c.EstablishLeadership != nil {
+		return c.EstablishLeadership()
 	}
 	return nil
 }
 
 // revokeLeadership is invoked once we step down as leader.
 // This is used to cleanup any state that may be specific to a leader.
-func (c *cerebrum) revokeLeadership() error {
-	if c.config.RevokeLeadership != nil {
-		return c.config.RevokeLeadership()
+func (c *LeadershipMonitor) revokeLeadership() error {
+	if c.RevokeLeadership != nil {
+		return c.RevokeLeadership()
 	}
 	return nil
 }
 
 // reconcileMember is used to do an async reconcile of a single
 // serf member
-func (c *cerebrum) reconcileMember(member serf.Member) (err error) {
+func (c *LeadershipMonitor) reconcileMember(member serf.Member) (err error) {
 
 	// Check if this is a member we should handle
 	var node *NodeDetails
@@ -140,7 +158,7 @@ func (c *cerebrum) reconcileMember(member serf.Member) (err error) {
 	}
 
 	// Validate node is in the same data center
-	if node.DataCenter != c.config.DataCenter {
+	if node.DataCenter != c.dataCenter {
 		c.logger.Warn("skipping reconcile of node", "node", member)
 		return nil
 	}
@@ -164,7 +182,7 @@ func (c *cerebrum) reconcileMember(member serf.Member) (err error) {
 
 // handleAliveMember is used to ensure the node
 // is registered, with a passing health check.
-func (c *cerebrum) handleAliveMember(member serf.Member, details *NodeDetails) error {
+func (c *LeadershipMonitor) handleAliveMember(member serf.Member, details *NodeDetails) error {
 
 	// Attempt to join the consul server
 	if err := c.joinConsulServer(member, details); err != nil {
@@ -177,30 +195,30 @@ func (c *cerebrum) handleAliveMember(member serf.Member, details *NodeDetails) e
 
 // handleFailedMember is used to mark the node's status
 // as being critical, along with all checks as unknown.
-func (c *cerebrum) handleFailedMember(member serf.Member, details *NodeDetails) error {
+func (c *LeadershipMonitor) handleFailedMember(member serf.Member, details *NodeDetails) error {
 	c.logger.Info("member failed, marking health critical", "member", member.Name)
 	return c.nodeStatusUpdater.Update(details, StatusFailed)
 }
 
 // handleLeftMember is used to handle members that gracefully
 // left. They are deregistered if necessary.
-func (c *cerebrum) handleLeftMember(member serf.Member, details *NodeDetails) error {
+func (c *LeadershipMonitor) handleLeftMember(member serf.Member, details *NodeDetails) error {
 	return c.handleDeregisterMember(StatusLeft, member, details)
 }
 
 // handleReapMember is used to handle members that have been
 // reaped after a prolonged failure. They are deregistered.
-func (c *cerebrum) handleReapMember(member serf.Member, details *NodeDetails) error {
+func (c *LeadershipMonitor) handleReapMember(member serf.Member, details *NodeDetails) error {
 	return c.handleDeregisterMember(StatusReaped, member, details)
 }
 
 // handleDeregisterMember is used to deregister a member of a given reason
-func (c *cerebrum) handleDeregisterMember(reason NodeStatus, member serf.Member, details *NodeDetails) error {
+func (c *LeadershipMonitor) handleDeregisterMember(reason NodeStatus, member serf.Member, details *NodeDetails) error {
 	// Do not deregister ourself. This can only happen if the current leader
 	// is leaving. Instead, we should allow a follower to take-over and
 	// deregister us later.
-	if member.Name == c.config.NodeName {
-		c.logger.Warn("deregistering self should be done by follower", "node", c.config.NodeName)
+	if member.Name == c.nodeName {
+		c.logger.Warn("deregistering self should be done by follower", "node", c.nodeName)
 		return nil
 	}
 
@@ -215,9 +233,9 @@ func (c *cerebrum) handleDeregisterMember(reason NodeStatus, member serf.Member,
 }
 
 // joinConsulServer is used to try to join another consul server
-func (c *cerebrum) joinConsulServer(m serf.Member, details *NodeDetails) error {
+func (c *LeadershipMonitor) joinConsulServer(m serf.Member, details *NodeDetails) error {
 	// Do not join ourself
-	if m.Name == c.config.NodeName {
+	if m.Name == c.nodeName {
 		return nil
 	}
 
@@ -246,7 +264,7 @@ func (c *cerebrum) joinConsulServer(m serf.Member, details *NodeDetails) error {
 }
 
 // removeConsulServer is used to try to remove a consul server that has left
-func (c *cerebrum) removeConsulServer(m serf.Member, port int) error {
+func (c *LeadershipMonitor) removeConsulServer(m serf.Member, port int) error {
 	// Attempt to remove as peer
 	peer := &net.TCPAddr{IP: m.Addr, Port: port}
 	future := c.raft.RemovePeer(peer.String())
