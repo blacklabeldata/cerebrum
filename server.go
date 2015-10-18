@@ -56,8 +56,11 @@ func New(c *Config) (cer Cerebrum, err error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cereb := &cerebrum{
-		config:      c,
-		logger:      logger,
+		config: c,
+		logger: logger,
+
+		// TODO: Setup FSM
+		// fsm:         NewFSM(""),
 		dialer:      NewDialer(NewPool(c.LogOutput, 5*time.Minute, c.TLSConfig)),
 		serfEventCh: serfEventCh,
 		reconcileCh: reconcilerCh,
@@ -149,7 +152,19 @@ type cerebrum struct {
 func (c *cerebrum) Start() error {
 
 	// Start monitoring raft cluster
-	go c.monitorLeadership()
+	monitor := LeadershipMonitor{
+		nodeName:            c.config.NodeName,
+		dataCenter:          c.config.DataCenter,
+		raft:                c.raft,
+		reconcileInterval:   c.config.ReconcileInterval,
+		EstablishLeadership: c.config.EstablishLeadership,
+		RevokeLeadership:    c.config.RevokeLeadership,
+		nodeStatusUpdater:   c.nodeStatusUpdater,
+		serf:                c.serf,
+		reconcileCh:         c.reconcileCh,
+		logger:              log.NewLogger(c.config.LogOutput, "leadership-monitor"),
+	}
+	c.grim.Spawn(&monitor)
 
 	// Start serf handler
 	c.serfer.Start()
