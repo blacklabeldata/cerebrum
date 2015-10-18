@@ -2,6 +2,10 @@ package cerebrum
 
 import "github.com/hashicorp/serf/serf"
 
+func (c *cerebrum) setLeader(name string) {
+	c.leader = name
+}
+
 func (c *cerebrum) HandleMemberJoin(e serf.MemberEvent) {
 	for _, m := range e.Members {
 		c.logger.Info("member joined", "name", m.Name, "addr", m.Addr, "port", m.Port)
